@@ -30,12 +30,13 @@ const Config = struct {
     speed: f32,
     dampening: f32,
     planetCount: u8,
-    planetPositions: [20]f32,
+    planetPositions: [200]f32,
     nextShip: usize,
     maxPoints: usize,
     pointsX: usize = 0,
     loops: usize = 5,
     currentlength: usize = 0,
+    showShips: bool = true,
 };
 var config: Config = undefined;
 var freeShips: usize = 0;
@@ -88,6 +89,11 @@ export fn init(width: usize, height: usize, blockSize: usize, length: usize, ext
 }
 export fn setLoops(loops: u16) void {
     config.loops = loops;
+}
+export fn setShowShips(showShips: bool) bool {
+    const res = config.showShips;
+    config.showShips = showShips;
+    return res;
 }
 
 fn nextPacket() void {
@@ -214,16 +220,17 @@ export fn updatePositions() i8 {
 
 export fn paint() i8 {
     preparePaint();
+    if (config.showShips) {
+        var s: usize = 0;
+        var shown: usize = 0;
 
-    var s: usize = 0;
-    var shown: usize = 0;
-
-    while (s < config.length and shown < 150000) {
-        if (landed[s] < 0) {
-            paintShip(xy[2 * s], xy[2 * s + 1]);
-            shown += 1;
+        while (s < config.length and shown < 150000) {
+            if (landed[s] < 0) {
+                paintShip(xy[2 * s], xy[2 * s + 1]);
+                shown += 1;
+            }
+            s += 1;
         }
-        s += 1;
     }
     finishPaint();
     return 0;

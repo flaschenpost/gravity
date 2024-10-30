@@ -3,7 +3,7 @@ let canvasWidth=1400;
 let canvasHeight=600;
 let last = 0;
 let img = undefined;
-let planetCount=4;
+let planetCount=3;
 // let startBalls=22400;
 let startBalls=25*canvasWidth;
 let pendingBalls=400;
@@ -15,6 +15,7 @@ let ctx;
 let timer=undefined;
 
 let pause=false;
+let showShips=true;
 
 function getHex(n){
   return n.toString(16).padStart(2, '0');
@@ -24,6 +25,7 @@ function getHexColor(i,j){
 }
 
 function setColorPickers(anz){
+  console.log("setColorPickers: anz=", anz);
   const div = document.getElementById('colorList');
   div.innerHTML=' ';
   for (let i=0; i<anz; i++){
@@ -62,22 +64,22 @@ let controls = {
   dampening: 0.99997,
   loops:4,
   positions: [
-    [(0.3+0.2*Math.random())*canvasWidth,(0.5+0.2*Math.random())*canvasHeight],
-    [0.4*canvasWidth,0.4*canvasHeight],
-    [0.6*canvasWidth,0.39*canvasHeight],
-    [0.51*canvasWidth,0.7*canvasHeight],
-    [0.32*canvasWidth,0.55*canvasHeight],
-    [(0.2+0.6*Math.random())*canvasWidth,(0.5+0.9*Math.random())*canvasHeight],
-    [(0.2+0.8*Math.random())*canvasWidth,(0.5+0.9*Math.random())*canvasHeight],
-    [(0.2+0.8*Math.random())*canvasWidth,(0.5+0.9*Math.random())*canvasHeight],
-    [(0.2+0.8*Math.random())*canvasWidth,(0.5+0.9*Math.random())*canvasHeight],
-    [(0.2+0.8*Math.random())*canvasWidth,(0.5+0.9*Math.random())*canvasHeight],
-    [(0.2+0.8*Math.random())*canvasWidth,(0.5+0.9*Math.random())*canvasHeight],
-    [(0.2+0.8*Math.random())*canvasWidth,(0.5+0.9*Math.random())*canvasHeight],
-    [(0.2+0.8*Math.random())*canvasWidth,(0.5+0.9*Math.random())*canvasHeight],
-    [(0.2+0.8*Math.random())*canvasWidth,(0.5+0.9*Math.random())*canvasHeight],
-    [(0.2+0.8*Math.random())*canvasWidth,(0.5+0.9*Math.random())*canvasHeight],
-    [(0.2+0.8*Math.random())*canvasWidth,(0.5+0.9*Math.random())*canvasHeight],
+    [(0.3+0.2*Math.random()),(0.5+0.2*Math.random())],
+    [0.4,0.4],
+    [0.6,0.39],
+    [(0.3+0.4*Math.random()),(0.4+0.3*Math.random())],
+    [(0.3+0.4*Math.random()),(0.4+0.3*Math.random())],
+    [(0.3+0.4*Math.random()),(0.4+0.3*Math.random())],
+    [(0.3+0.4*Math.random()),(0.4+0.3*Math.random())],
+    [(0.3+0.4*Math.random()),(0.4+0.3*Math.random())],
+    [(0.3+0.4*Math.random()),(0.4+0.3*Math.random())],
+    [(0.3+0.4*Math.random()),(0.4+0.3*Math.random())],
+    [(0.3+0.4*Math.random()),(0.4+0.3*Math.random())],
+    [(0.3+0.4*Math.random()),(0.4+0.3*Math.random())],
+    [(0.2+0.8*Math.random()),(0.1+0.8*Math.random())],
+    [(0.2+0.8*Math.random()),(0.1+0.8*Math.random())],
+    [(0.2+0.8*Math.random()),(0.1+0.8*Math.random())],
+    [(0.2+0.8*Math.random()),(0.1+0.8*Math.random())],
   ],
   colors:[],
 };
@@ -95,7 +97,7 @@ document.addEventListener('keydown', (event) => {
       worker.setLoops(controls.loops);
       break;
     case 'ArrowDown':
-      if(controls.loops > 3){
+      if(controls.loops >= 3){
         controls.loops -= 2;
         worker.setLoops(controls.loops);
       }
@@ -115,13 +117,17 @@ document.addEventListener('keydown', (event) => {
       }
       console.log("length = ", length, " res=", res);
       break;
+    case 's':
+      showShips=!showShips;
+      worker.setShowShips(showShips);
+      break;
   }
 });
 
 let lastPaint;
 
 function startSimulation(){
-  console.log("startSimulation!");
+  console.log("startSimulation! ", planetCount);
   document.getElementById('intro').style.display='none';
   document.body.style.backgroundColor='rgb(0,8,65)';
   planetCount    = document.getElementById('planetCount').value;
@@ -192,7 +198,7 @@ function finishPaint(){
     ctx.fillStyle=colorValues[i];
     ctx.strokeStyle=10;
     ctx.beginPath();
-    ctx.arc(controls.positions[i][0], controls.positions[i][1], 9, 0, 1.9*Math.PI);
+    ctx.arc(Math.round(canvasWidth*controls.positions[i][0]), Math.round(canvasHeight*controls.positions[i][1]), 9, 0, 1.9*Math.PI);
     ctx.stroke();
     ctx.fill();
   }
@@ -218,16 +224,16 @@ function setup() {
       finished:finished,
     }
   };
-  WebAssembly.instantiateStreaming(fetch("graviti_0.3.wasm"), importObject).then((result) => {
+  WebAssembly.instantiateStreaming(fetch("gravity.wasm"), importObject).then((result) => {
     console.log("gravity.wasm gave : ", result.instance);
     worker = result.instance.exports;
-    console.log("start ");
+    console.log("start ", controls);
     // export fn init(width: usize, height: usize, blockSize: usize, lT, length, ength: usize, extra: usize, speed: f32, dampening: f32, memory: [*]u64) i8 {
     let res = worker.init(canvasWidth, canvasHeight, UNIT, length, pendingBalls, controls.speed, controls.dampening);
     console.log("worker init result: " , res);
 
     for(let planet=0; planet<planetCount; planet++){
-      worker.addPlanet(controls.positions[planet][0],controls.positions[planet][1]);
+      worker.addPlanet(Math.round(canvasWidth * controls.positions[planet][0]),Math.round(canvasHeight * controls.positions[planet][1]));
     }
     worker.setLoops(controls.loops);
   })
