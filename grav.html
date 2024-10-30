@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8"/>
+</head>
+<body >
+<br/><span>Gravity (c) Marco Gergele</span>
+<div id="intro">
+<h1>Gravitation und Fraktale</h1>
+<p>Stellt euch vor, irgendwo im Weltall stünden ein paar Sterne an einer festen Position. Alle gleich schwer, alle in einer Ebene.<br/>
+Und dann stellt euch vor, ihr lasst irgendwo in dieser Ebene einen Steinbrocken fallen. Die Sterne ziehen den Brocken an. Aber auf welchen der Sterne fällt der Brocken am Ende seiner Bahn?</p>
+<p>Lasst es uns ausprobieren! Positioniert Sterne, legt fest, wie viele Brocken ihr gleichzeitig fallen lassen wollt, und wie schnell sie fallen sollen, und dann schaut zu.<br/>
+<label for="planetCount">Anzahl der Sterne</label>
+<input type="number" min="2" max="10" id="planetCount" value="3" onChange="setColorPickers(this.value);"/><br/>
+<label for="canvasWidth">Breite des Feldes</label>
+<input type="number" min="2" max="10" id="canvasWidth" value="1400"/><br/>
+<label for="canvasHeight">Höhe des Feldes</label>
+<input type="number" min="2" max="10" id="canvasHeight" value="600"/><br/>
+<label for="startBalls">Anzahl Startschiffe</label>
+<input type="number" min="1" max="9000000" id="startBalls" value="56000"/><br/>
+<label for="pendingBalls">Restschiffe</label>
+<input type="number" min="0" max="2000" id="pendingBalls" value="500"/><br/>
+<label for="gravity">Gravity</label>
+<input type="number" min="0" max="2000" id="gravity" value="50"/><br/>
+<label for="speed">Speed</label>
+<input type="number" min="0" max="2000" id="speed" value="50"/><br/>
+
+<div id="colorList">
+</div>
+</div>
+<canvas id="renderCanvas"></canvas>
+<br/>
+<button type="submit" name="start" onClick="startSimulation();">Start</button>
+</p>
+<script src="grav.js"></script>
+<style>
+        <style>
+            html, body {
+                overflow: hidden;
+                width: 100%;
+                height: 100%;
+                margin: 0;
+                padding: 0;
+                background-color: #000841;
+            }
+            #renderCanvas {
+                touch-action: none;
+            }
+    /* Increase font size for Tweakpane controls */
+    .tp-rotv {
+        font-size: 22px; /* Adjust this value as needed */
+    }
+    .tp-dfwv{
+      width:20;
+      padding-right:5em;
+    }
+    .tp-label {
+        font-size: 22px; /* Adjust label font size */
+    }
+    .tp-input {
+        padding: 8px; /* Adjust input padding for better touch targets */
+    }
+</style>
+</body>
+</html>
+
