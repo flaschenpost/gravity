@@ -15,11 +15,14 @@ var globWidth: u32 = 0;
 var xy: []f32 = undefined;
 // 4 byte for sx, 4 byte for sy, 8 byte ship
 var sxy: []f32 = undefined;
+// ai
+var axy: []f32 = undefined;
 // 4 byte for sx, 4 byte for sy
 var startPos: []f32 = undefined;
 // 1 byte per ship, -1 = not landed, >=0 = planet unevaluated (new), -2 = waiting for rewrite
 var landed: []i8 = undefined;
 var radius: f32 = 11;
+var rad2: f32 = undefined;
 
 const Config = struct {
     width: usize,
@@ -53,12 +56,17 @@ export fn init(width: usize, height: usize, blockSize: usize, length: usize, ext
     // 1 byte for "is new landed" information
     // some bytes between for alignment
 
+    rad2 = radius * radius;
+
     var pages: usize = 1 + 2 * 4 * length / 16 / 1024;
     consoleLog(pages);
     xy = std.heap.wasm_allocator.alloc(f32, pages * 16 * 1024) catch {
         return -1;
     };
     sxy = std.heap.wasm_allocator.alloc(f32, pages * 16 * 1024) catch {
+        return -1;
+    };
+    axy = std.heap.wasm_allocator.alloc(f32, pages * 16 * 1024) catch {
         return -1;
     };
     startPos = std.heap.wasm_allocator.alloc(f32, pages * 16 * 1024) catch {
@@ -73,14 +81,14 @@ export fn init(width: usize, height: usize, blockSize: usize, length: usize, ext
 
     config = Config{ .width = width, .height = height, .blockSize = blockSize, .length = length, .extra = extra, .speed = speed, .dampening = dampening, .planetCount = 0, .planetPositions = undefined, .nextShip = 0, .maxPoints = width * height / blockSize / blockSize };
     config.pointsX = width / blockSize;
-    config.currentlength = config.length;
+    config.currentlength = getBlockStartSize() + config.extra;
 
     freeShips = length;
 
     for (0..length) |i| {
         landed[i] = 99;
     }
-    for (0..length - extra) |i| {
+    for (0..getBlockStartSize()) |i| {
         if (initShip(i) == 0) {
             break;
         }
@@ -119,6 +127,24 @@ fn nextPacket() void {
     packetLock = false;
 }
 
+fn getCols() u32 {
+    return @as(usize, @intFromFloat(1.6 * std.math.sqrt(@as(f32, @floatFromInt(config.length - config.extra)))));
+}
+fn getBlockStartSize() u32 {
+    const cols = getCols();
+    const rows = (config.length - config.extra) / cols;
+    return cols * rows;
+}
+fn getBlockStartPos(nr: usize, result: [*]u32) void {
+    const cols = getCols();
+    const rows = (config.length - config.extra) / cols;
+    const metaBlockSize = cols * rows;
+    const metaPos = nr / metaBlockSize;
+    const rest = nr - metaPos * metaBlockSize;
+    result[0] = config.blockSize * (metaPos % 5 * cols + rest % cols) + config.blockSize / 2;
+    result[1] = config.blockSize * (metaPos / 5 * rows + rest / cols) + config.blockSize / 2;
+}
+
 fn getStartPos(nr: usize, result: [*]u32) void {
     result[0] = config.blockSize * (nr % config.pointsX) + config.blockSize / 2;
     result[1] = config.blockSize * (nr / (config.pointsX)) + config.blockSize / 2;
@@ -138,7 +164,7 @@ fn initShip(i: usize) u8 {
     //consoleLog(nr);
     //consoleLog(198);
     config.nextShip += 1;
-    getStartPos(nr, &pos);
+    getBlockStartPos(nr, &pos);
     landed[i] = -1;
     startPos[2 * i] = @as(f32, @floatFromInt(pos[0]));
     startPos[2 * i + 1] = @as(f32, @floatFromInt(pos[1]));
@@ -165,41 +191,47 @@ export fn setLength(l: usize) usize {
     }
     return config.length;
 }
+fn getAi(xi: f32, yi: f32, ax: *f32, ay: *f32, dx: *f32, dy: *f32) i8 {
+    ax.* = 0;
+    ay.* = 0;
+    for (0..config.planetCount) |planet| {
+        //console.log("position = ", p);
+        dx.* = config.planetPositions[2 * planet] - xi;
+        dy.* = config.planetPositions[2 * planet + 1] - yi;
+        const r2 = dx.* * dx.* + dy.* * dy.*;
+        if (r2 <= rad2) {
+            return planet;
+        }
+        ax.* += config.speed / (1 + r2) * dx.*;
+        ay.* += config.speed / (1 + r2) * dy.*;
+        // console.log("dx=", dx, " dy=", dy," ax=", ax," ay=" , ay);
+    }
+    return -1;
+}
 
 export fn updatePositions() i8 {
-    const rad2 = radius * radius;
     const loops = config.loops;
     var dx: f32 = undefined;
     var dy: f32 = undefined;
     var ax: f32 = undefined;
     var ay: f32 = undefined;
-    var r2: f32 = undefined;
     //var changed: bool = false;
     for (0..config.length) |i| {
         if (landed[i] >= 0) {
             continue;
         }
         ship: for (0..loops) |_| {
-            ax = 0;
-            ay = 0;
-            for (0..config.planetCount) |planet| {
-                //console.log("position = ", p);
-                dx = config.planetPositions[2 * planet] - xy[2 * i];
-                dy = config.planetPositions[2 * planet + 1] - xy[2 * i + 1];
-                r2 = dx * dx + dy * dy;
-                if (r2 <= rad2) {
-                    landed[i] = @intCast(planet);
-                    freeShips += 1;
-                    //changed = true;
-                    //consoleLog(24);
-                    //consoleLog(nr);
-                    addResult(startPos[2 * i], startPos[2 * i + 1], @intCast(planet));
-                    break :ship;
-                }
-                ax += config.speed / (1 + r2) * dx;
-                ay += config.speed / (1 + r2) * dy;
-                // console.log("dx=", dx, " dy=", dy," ax=", ax," ay=" , ay);
+            const planet = getAi(xy[2 * i], xy[2 * i + 1], &ax, &ay, &dx, &dy);
+            if (0 <= planet) {
+                landed[i] = @intCast(planet);
+                freeShips += 1;
+                //changed = true;
+                //consoleLog(24);
+                //consoleLog(nr);
+                addResult(startPos[2 * i], startPos[2 * i + 1], @intCast(planet));
+                break :ship;
             }
+
             sxy[2 * i] += ax;
             sxy[2 * i + 1] += ay;
             //console.log("sx=", sxy[2*i], " sy=", sxy[2*i+1]," ax=", ax," ay=" , ay);
