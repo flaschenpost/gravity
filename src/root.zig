@@ -2,27 +2,39 @@ const std = @import("std");
 
 extern fn consoleLog(arg: i64) void;
 extern fn preparePaint() void;
-extern fn paintShip(x: f32, y: f32) void;
-extern fn addResult(x: f32, y: f32, color: u8) void;
+extern fn paintShip(x: f64, y: f64) void;
+extern fn addResult(x: f64, y: f64, color: u8) void;
 extern fn finishPaint() void;
-extern fn debugBlock(nr: u32, x: f32, y: f32) void;
+extern fn debugBlock(nr: u32, x: f64, y: f64) void;
 extern fn finished() void;
 
 var globWidth: u32 = 0;
-// var planetPositions: [*]f32 = undefined;
+// var planetPositions: [*]f64 = undefined;
 
 // 4 byte for x, 4 byte for y, 8 byte ship
-var xy: []f32 = undefined;
+var xy: []f64 = undefined;
 // 4 byte for sx, 4 byte for sy, 8 byte ship
-var sxy: []f32 = undefined;
-// ai
-var axy: []f32 = undefined;
+var sxy: []f64 = undefined;
 // 4 byte for sx, 4 byte for sy
-var startPos: []f32 = undefined;
+var startPos: []f64 = undefined;
 // 1 byte per ship, -1 = not landed, >=0 = planet unevaluated (new), -2 = waiting for rewrite
 var landed: []i8 = undefined;
-var radius: f32 = 11;
-var rad2: f32 = undefined;
+var radius: f64 = 51;
+var rad2: f64 = undefined;
+const dT: f64 = 0.3;
+
+// 4th order Yoshida https://en.wikipedia.org/wiki/Leapfrog_integration
+const THIRD_S_2: f64 = std.math.pow(f64, 2.0, 1.0 / 3.0);
+const w0 = -THIRD_S_2 / (2 - THIRD_S_2);
+const w1 = 1 / (2 - THIRD_S_2);
+const c1 = w1 / 2;
+const c4 = w1 / 2;
+const c2 = (w0 + w1) / 2;
+const c3 = (w0 + w1) / 2;
+
+const d1 = w1;
+const d3 = w1;
+const d2 = w0;
 
 const Config = struct {
     width: usize,
@@ -30,10 +42,10 @@ const Config = struct {
     blockSize: usize,
     length: usize,
     extra: usize,
-    speed: f32,
-    dampening: f32,
+    speed: f64,
+    dampening: f64,
     planetCount: u8,
-    planetPositions: [200]f32,
+    planetPositions: [200]f64,
     nextShip: usize,
     maxPoints: usize,
     pointsX: usize = 0,
@@ -46,7 +58,7 @@ var freeShips: usize = 0;
 var createShips: usize = 0;
 var packetLock: bool = false;
 
-export fn init(width: usize, height: usize, blockSize: usize, length: usize, extra: usize, speed: f32, dampening: f32) i8 {
+export fn init(width: usize, height: usize, blockSize: usize, length: usize, extra: usize, speed: f64, dampening: f64) i8 {
     // 3*4 byte for exchange
     // each active point needs
     // 8 byte for xy
@@ -60,16 +72,13 @@ export fn init(width: usize, height: usize, blockSize: usize, length: usize, ext
 
     var pages: usize = 1 + 2 * 4 * length / 16 / 1024;
     consoleLog(pages);
-    xy = std.heap.wasm_allocator.alloc(f32, pages * 16 * 1024) catch {
+    xy = std.heap.wasm_allocator.alloc(f64, pages * 16 * 1024) catch {
         return -1;
     };
-    sxy = std.heap.wasm_allocator.alloc(f32, pages * 16 * 1024) catch {
+    sxy = std.heap.wasm_allocator.alloc(f64, pages * 16 * 1024) catch {
         return -1;
     };
-    axy = std.heap.wasm_allocator.alloc(f32, pages * 16 * 1024) catch {
-        return -1;
-    };
-    startPos = std.heap.wasm_allocator.alloc(f32, pages * 16 * 1024) catch {
+    startPos = std.heap.wasm_allocator.alloc(f64, pages * 16 * 1024) catch {
         return -1;
     };
 
@@ -93,6 +102,10 @@ export fn init(width: usize, height: usize, blockSize: usize, length: usize, ext
             break;
         }
     }
+    debugBlock(0, c1, c2);
+    debugBlock(0, c3, c4);
+    debugBlock(0, d1, d2);
+    debugBlock(0, d3, d3);
     return 0;
 }
 export fn setLoops(loops: u16) void {
@@ -128,7 +141,7 @@ fn nextPacket() void {
 }
 
 fn getCols() u32 {
-    return @as(usize, @intFromFloat(1.6 * std.math.sqrt(@as(f32, @floatFromInt(config.length - config.extra)))));
+    return @as(usize, @intFromFloat(1.6 * std.math.sqrt(@as(f64, @floatFromInt(config.length - config.extra)))));
 }
 fn getBlockStartSize() u32 {
     const cols = getCols();
@@ -166,8 +179,8 @@ fn initShip(i: usize) u8 {
     config.nextShip += 1;
     getBlockStartPos(nr, &pos);
     landed[i] = -1;
-    startPos[2 * i] = @as(f32, @floatFromInt(pos[0]));
-    startPos[2 * i + 1] = @as(f32, @floatFromInt(pos[1]));
+    startPos[2 * i] = @as(f64, @floatFromInt(pos[0]));
+    startPos[2 * i + 1] = @as(f64, @floatFromInt(pos[1]));
     // debugBlock(nr, startPos[2 * i], startPos[2 * i + 1]);
     xy[2 * i] = startPos[2 * i];
     xy[2 * i + 1] = startPos[2 * i + 1];
@@ -177,7 +190,7 @@ fn initShip(i: usize) u8 {
     return 1;
 }
 
-export fn addPlanet(x: f32, y: f32) i8 {
+export fn addPlanet(x: f64, y: f64) i8 {
     config.planetPositions[2 * config.planetCount] = x;
     config.planetPositions[2 * config.planetCount + 1] = y;
     config.planetCount += 1;
@@ -191,55 +204,113 @@ export fn setLength(l: usize) usize {
     }
     return config.length;
 }
-fn getAi(xi: f32, yi: f32, ax: *f32, ay: *f32, dx: *f32, dy: *f32) i8 {
+fn getAi(xi: f64, yi: f64, ax: *f64, ay: *f64) i8 {
     ax.* = 0;
     ay.* = 0;
     for (0..config.planetCount) |planet| {
         //console.log("position = ", p);
-        dx.* = config.planetPositions[2 * planet] - xi;
-        dy.* = config.planetPositions[2 * planet + 1] - yi;
-        const r2 = dx.* * dx.* + dy.* * dy.*;
+        const dx: f64 = config.planetPositions[2 * planet] - xi;
+        const dy: f64 = config.planetPositions[2 * planet + 1] - yi;
+        const r2 = dx * dx + dy * dy;
         if (r2 <= rad2) {
-            return planet;
+            return @intCast(planet);
         }
-        ax.* += config.speed / (1 + r2) * dx.*;
-        ay.* += config.speed / (1 + r2) * dy.*;
+        ax.* += config.speed / (1 + r2) * dx;
+        ay.* += config.speed / (1 + r2) * dy;
         // console.log("dx=", dx, " dy=", dy," ax=", ax," ay=" , ay);
     }
     return -1;
 }
 
+fn landPlanet(i: usize, planet: i8) void {
+    landed[i] = planet;
+    freeShips += 1;
+    //changed = true;
+    //consoleLog(24);
+    //consoleLog(nr);
+    addResult(startPos[2 * i], startPos[2 * i + 1], @intCast(planet));
+}
+
 export fn updatePositions() i8 {
     const loops = config.loops;
-    var dx: f32 = undefined;
-    var dy: f32 = undefined;
-    var ax: f32 = undefined;
-    var ay: f32 = undefined;
+    var ax: f64 = undefined;
+    var ay: f64 = undefined;
+    var xm: f64 = undefined;
+    var ym: f64 = undefined;
+    var vxm: f64 = undefined;
+    var vym: f64 = undefined;
+
     //var changed: bool = false;
     for (0..config.length) |i| {
         if (landed[i] >= 0) {
             continue;
         }
+
+        consoleLog(64);
         ship: for (0..loops) |_| {
-            const planet = getAi(xy[2 * i], xy[2 * i + 1], &ax, &ay, &dx, &dy);
+            // step 1, x_i¹
+            xm = xy[2 * i] + c1 * sxy[2 * i] * dT;
+            ym = xy[2 * i + 1] + c1 * sxy[2 * i + 1] * dT;
+            debugBlock(i, xm, ym);
+            debugBlock(i, xm, ym);
+
+            var planet = getAi(xm, ym, &ax, &ay);
             if (0 <= planet) {
-                landed[i] = @intCast(planet);
-                freeShips += 1;
-                //changed = true;
-                //consoleLog(24);
-                //consoleLog(nr);
-                addResult(startPos[2 * i], startPos[2 * i + 1], @intCast(planet));
+                landPlanet(i, planet);
                 break :ship;
             }
+            debugBlock(i, ax, ay);
 
-            sxy[2 * i] += ax;
-            sxy[2 * i + 1] += ay;
-            //console.log("sx=", sxy[2*i], " sy=", sxy[2*i+1]," ax=", ax," ay=" , ay);
-            sxy[2 * i] *= config.dampening;
-            sxy[2 * i + 1] *= config.dampening;
-            xy[2 * i] += sxy[2 * i];
-            xy[2 * i + 1] += sxy[2 * i + 1];
+            // v_i¹
+            vxm = sxy[2 * i] + d1 * ax * dT;
+            vym = sxy[2 * i + 1] + d1 * ay * dT;
+            debugBlock(i, vxm, vym);
+
+            // step 2, x_i²
+            xm = xm + c2 * vxm * dT;
+            ym = ym + c2 * vym * dT;
+            debugBlock(i, xm, ym);
+            debugBlock(i, xm, ym);
+
+            planet = getAi(xm, ym, &ax, &ay);
+            if (0 <= planet) {
+                landPlanet(i, planet);
+                break :ship;
+            }
+            debugBlock(i, ax, ay);
+
+            // v_i²
+            vxm = xm + d2 * ax * dT;
+            vym = ym + d2 * ay * dT;
+            debugBlock(i, vxm, vym);
+
+            // step 3, x_i³
+            xm = xm + c3 * vxm * dT;
+            ym = ym + c3 * vym * dT;
+            debugBlock(i, xm, ym);
+            debugBlock(i, xm, ym);
+
+            planet = getAi(xm, ym, &ax, &ay);
+            if (0 <= planet) {
+                landPlanet(i, planet);
+                break :ship;
+            }
+            debugBlock(i, ax, ay);
+
+            // v_i³
+            vxm = xm + d3 * ax * dT;
+            vym = ym + d3 * ay * dT;
+            debugBlock(i, vxm, vym);
+
+            xy[2 * i] = xm + c4 * vxm * dT;
+            xy[2 * i + 1] = ym + c4 * vym * dT;
+            debugBlock(i, xy[2 * i], xy[2 * i + 1]);
+            debugBlock(i, xy[2 * i], xy[2 * i + 1]);
+
+            sxy[2 * i] = vxm * config.dampening;
+            sxy[2 * i + 1] = vym * config.dampening;
         }
+        consoleLog(65);
     }
     if (!packetLock and freeShips >= config.length - config.extra - 1) {
         nextPacket();
