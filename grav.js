@@ -1,19 +1,20 @@
 let UNIT=1;
-let canvasWidth=1400;
-let canvasHeight=600;
+let canvasWidth=480;
+let canvasHeight=320;
 let last = 0;
 let img = undefined;
 let planetCount=3;
 // let startBalls=22400;
-let startBalls=25*canvasWidth;
-let pendingBalls=400;
-let length = pendingBalls+startBalls;
+let startBalls=undefined;
+let pendingBalls=undefined;
+let length = undefined;
 let initColorValues= [[200,30,60],[20,180,10],[40,80,210],[180,40,233],[0,230,215]];
 let colorValues=[];
 let worker=undefined;
 let ctx;
 let timer=undefined;
 
+let keysActive=false;
 let pause=false;
 let showShips=true;
 
@@ -61,10 +62,10 @@ setColorPickers(3);
 
 let controls = {
   speed:0.3,
-  dampening: 0.99997,
+  dampening: 0.99999,
   loops:4,
   positions: [
-    [(0.3+0.2*Math.random()),(0.5+0.2*Math.random())],
+    [0.3,0.5],
     [0.4,0.4],
     [0.6,0.39],
     [(0.3+0.4*Math.random()),(0.4+0.3*Math.random())],
@@ -85,6 +86,9 @@ let controls = {
 };
 
 document.addEventListener('keydown', (event) => {
+  if(! keysActive){
+    return;
+  }
   // Check if the pressed key is space
   let res=-1;
   switch (event.key){
@@ -129,7 +133,7 @@ let lastPaint;
 function startSimulation(){
   console.log("startSimulation! ", planetCount);
   document.getElementById('intro').style.display='none';
-  document.body.style.backgroundColor='rgb(0,8,65)';
+  document.body.style.backgroundColor='rgb(0,80,65)';
   planetCount    = document.getElementById('planetCount').value;
   canvasWidth    = document.getElementById('canvasWidth').value;
   canvasHeight   = document.getElementById('canvasHeight').value;
@@ -224,9 +228,10 @@ function setup() {
       finished:finished,
     }
   };
-  WebAssembly.instantiateStreaming(fetch("gravity.wasm"), importObject).then((result) => {
+  WebAssembly.instantiateStreaming(fetch("lib/bin/gravity.wasm"), importObject).then((result) => {
     console.log("gravity.wasm gave : ", result.instance);
     worker = result.instance.exports;
+    console.log(worker.getVersion());
     console.log("start ", controls);
     // export fn init(width: usize, height: usize, blockSize: usize, lT, length, ength: usize, extra: usize, speed: f32, dampening: f32, memory: [*]u64) i8 {
     let res = worker.init(canvasWidth, canvasHeight, UNIT, length, pendingBalls, controls.speed, controls.dampening);
@@ -240,6 +245,7 @@ function setup() {
     .catch((e) => {console.log("no worker: ", e); worker = 1;});
 
   updatePosition();
+  keysActive=true;
   timer=setInterval(updatePosition, 10);
   let el = document.getElementById('renderCanvas');
   ctx=el.getContext("2d");

@@ -1,5 +1,6 @@
 const std = @import("std");
 
+const TheVersion: u16 = 11;
 extern fn consoleLog(arg: i64) void;
 extern fn preparePaint() void;
 extern fn paintShip(x: f32, y: f32) void;
@@ -45,6 +46,10 @@ var config: Config = undefined;
 var freeShips: usize = 0;
 var createShips: usize = 0;
 var packetLock: bool = false;
+var blockCols: usize = undefined;
+var blockRows: usize = undefined;
+var pixelsPerMiniCol: usize = undefined;
+var rowsPerMiniBlock: usize = undefined;
 
 export fn init(width: usize, height: usize, blockSize: usize, length: usize, extra: usize, speed: f32, dampening: f32) i8 {
     // 3*4 byte for exchange
@@ -81,20 +86,46 @@ export fn init(width: usize, height: usize, blockSize: usize, length: usize, ext
 
     config = Config{ .width = width, .height = height, .blockSize = blockSize, .length = length, .extra = extra, .speed = speed, .dampening = dampening, .planetCount = 0, .planetPositions = undefined, .nextShip = 0, .maxPoints = width * height / blockSize / blockSize };
     config.pointsX = width / blockSize;
-    config.currentlength = getBlockStartSize() + config.extra;
+
+    const part: f32 = @sqrt(@as(f32, @floatFromInt(width * height)) / @as(f32, @floatFromInt((length - extra) * blockSize * blockSize)));
+
+    blockCols = 1 + @as(usize, @intFromFloat(part));
+    blockRows = 1 + @as(usize, @intFromFloat(part));
+
+    pixelsPerMiniCol = @as(usize, width / blockCols);
+    rowsPerMiniBlock = @as(usize, height / blockRows);
+
+    config.currentlength = rowsPerMiniBlock * pixelsPerMiniCol;
+    if (config.currentlength > length - extra) {
+        rowsPerMiniBlock -= 1;
+        config.currentlength = rowsPerMiniBlock * pixelsPerMiniCol;
+    }
+    consoleLog(399);
+    consoleLog(length);
+    // block columns per row
+    consoleLog(blockCols);
+    // block rows per column
+    consoleLog(blockRows);
+    consoleLog(pixelsPerMiniCol);
+    consoleLog(rowsPerMiniBlock);
+    consoleLog(config.currentlength);
+
+    // consoleLog(config.pointsX);
+    //config.currentlength = getBlockStartSize() + config.extra;
 
     freeShips = length;
 
     for (0..length) |i| {
         landed[i] = 99;
     }
-    for (0..getBlockStartSize()) |i| {
+    for (0..config.currentlength) |i| {
         if (initShip(i) == 0) {
             break;
         }
     }
     return 0;
 }
+
 export fn setLoops(loops: u16) void {
     config.loops = loops;
 }
@@ -111,11 +142,9 @@ fn nextPacket() void {
     packetLock = true;
     var created: u32 = 0;
     var search: u32 = 0;
-    while (created < config.currentlength - config.extra and search < config.length) {
+    while (created < config.currentlength and created < config.length - config.extra and search < config.length) {
         if (landed[search] >= 0) {
             if (initShip(search) == 0) {
-                consoleLog(499);
-                consoleLog(499);
                 consoleLog(499);
                 consoleLog(499);
                 return;
@@ -127,22 +156,12 @@ fn nextPacket() void {
     packetLock = false;
 }
 
-fn getCols() u32 {
-    return @as(usize, @intFromFloat(1.6 * std.math.sqrt(@as(f32, @floatFromInt(config.length - config.extra)))));
-}
-fn getBlockStartSize() u32 {
-    const cols = getCols();
-    const rows = (config.length - config.extra) / cols;
-    return cols * rows;
-}
 fn getBlockStartPos(nr: usize, result: [*]u32) void {
-    const cols = getCols();
-    const rows = (config.length - config.extra) / cols;
-    const metaBlockSize = cols * rows;
+    const metaBlockSize = pixelsPerMiniCol * rowsPerMiniBlock;
     const metaPos = nr / metaBlockSize;
     const rest = nr - metaPos * metaBlockSize;
-    result[0] = config.blockSize * (metaPos % 5 * cols + rest % cols) + config.blockSize / 2;
-    result[1] = config.blockSize * (metaPos / 5 * rows + rest / cols) + config.blockSize / 2;
+    result[0] = config.blockSize * (metaPos % blockCols * pixelsPerMiniCol + rest % pixelsPerMiniCol) + config.blockSize / 2;
+    result[1] = config.blockSize * (metaPos / blockCols * rowsPerMiniBlock + rest / pixelsPerMiniCol) + config.blockSize / 2;
 }
 
 fn getStartPos(nr: usize, result: [*]u32) void {
@@ -159,10 +178,6 @@ fn initShip(i: usize) u8 {
     if (nr >= config.maxPoints) {
         return 0;
     }
-    //consoleLog(199);
-    //consoleLog(i);
-    //consoleLog(nr);
-    //consoleLog(198);
     config.nextShip += 1;
     getBlockStartPos(nr, &pos);
     landed[i] = -1;
@@ -174,7 +189,30 @@ fn initShip(i: usize) u8 {
     sxy[2 * i] = 0;
     sxy[2 * i + 1] = 0;
     freeShips -= 1;
+
+    var ax: f32 = 0;
+    var ay: f32 = 0;
+    var dummy1: f32 = 0;
+    var dummy2: f32 = 0;
+
+    const planet = getAi(startPos[2 * i], startPos[2 * i + 1], &ax, &ay, &dummy1, &dummy2);
+    axy[2 * i] = ax;
+    axy[2 * i + 1] = ay;
+
+    if (0 <= planet) {
+        landed[i] = @intCast(planet);
+        freeShips += 1;
+        //changed = true;
+        //consoleLog(24);
+        //consoleLog(nr);
+        addResult(startPos[2 * i], startPos[2 * i + 1], @intCast(planet));
+    }
+
     return 1;
+}
+
+export fn getVersion() u16 {
+    return TheVersion;
 }
 
 export fn addPlanet(x: f32, y: f32) i8 {
@@ -200,16 +238,16 @@ fn getAi(xi: f32, yi: f32, ax: *f32, ay: *f32, dx: *f32, dy: *f32) i8 {
         dy.* = config.planetPositions[2 * planet + 1] - yi;
         const r2 = dx.* * dx.* + dy.* * dy.*;
         if (r2 <= rad2) {
-            return planet;
+            return @as(i8, @intCast(planet));
         }
-        ax.* += config.speed / (1 + r2) * dx.*;
-        ay.* += config.speed / (1 + r2) * dy.*;
-        // console.log("dx=", dx, " dy=", dy," ax=", ax," ay=" , ay);
+        ax.* += config.speed / (r2) * dx.*;
+        ay.* += config.speed / (r2) * dy.*;
     }
     return -1;
 }
 
 export fn updatePositions() i8 {
+    // dt is taken fixed to 1.0, play with dampening and config.speed (gravity) instead
     const loops = config.loops;
     var dx: f32 = undefined;
     var dy: f32 = undefined;
@@ -232,13 +270,16 @@ export fn updatePositions() i8 {
                 break :ship;
             }
 
-            sxy[2 * i] += ax;
-            sxy[2 * i + 1] += ay;
+            xy[2 * i] += sxy[2 * i] + 0.5 * ax;
+            xy[2 * i + 1] += sxy[2 * i + 1] + 0.5 * ay;
+
+            sxy[2 * i] += 0.5 * (ax + axy[2 * i]);
+            sxy[2 * i + 1] += 0.5 * (ay + axy[2 * i + 1]);
+            axy[2 * i] = ax;
+            axy[2 * i + 1] = ay;
             //console.log("sx=", sxy[2*i], " sy=", sxy[2*i+1]," ax=", ax," ay=" , ay);
             sxy[2 * i] *= config.dampening;
             sxy[2 * i + 1] *= config.dampening;
-            xy[2 * i] += sxy[2 * i];
-            xy[2 * i + 1] += sxy[2 * i + 1];
         }
     }
     if (!packetLock and freeShips >= config.length - config.extra - 1) {
